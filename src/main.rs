@@ -10,7 +10,7 @@ impl Backend {
     async fn check_syntax(&self, uri: Url, text: String) {
         let mut diagnostics = Vec::new();
         let mut open_parens: Vec<(usize, usize)> = Vec::new();
-        let mut open_ifs: Vec<(usize, usize)> = Vec::new();
+        let mut block_stack: Vec<(usize, usize, bool)> = Vec::new();
 
         for (i, line) in text.lines().enumerate() {
             let chars = line.char_indices().peekable();
@@ -30,34 +30,59 @@ impl Backend {
                             });
                         }
                     }
-                    'i' => {
-                        if line[j..].starts_with("if") {
-                            let after = line[j + 2..].chars().next();
-                            if after.is_none() || !after.unwrap().is_alphanumeric() {
-                                open_ifs.push((i, j));
-                            }
-                        }
+                    _ => {}
+                }
+                let rest = &line[j..];
+
+                if rest.starts_with("if") {
+                    let after = rest.chars().nth(2);
+                    if after.is_none() || !after.unwrap().is_alphanumeric() {
+                        block_stack.push((i, j, false)); // no else yet
                     }
-                    'e' => {
-                        if line[j..].starts_with("else") {
-                            let after = line[j + 4..].chars().next();
-                            if (after.is_none() || !after.unwrap().is_alphanumeric())
-                                && open_ifs.pop().is_none()
-                            {
+                } else if rest.starts_with("else") {
+                    let after = rest.chars().nth(4);
+                    if after.is_none() || !after.unwrap().is_alphanumeric() {
+                        if let Some(last) = block_stack.last_mut() {
+                            if last.2 {
                                 diagnostics.push(Diagnostic {
                                     range: Range {
                                         start: Position::new(i as u32, j as u32),
                                         end: Position::new(i as u32, (j + 4) as u32),
                                     },
                                     severity: Some(DiagnosticSeverity::ERROR),
-                                    message: "Unmatched 'else' with no corresponding 'if'"
-                                        .to_string(),
+                                    message: "Multiple 'else' blocks for one 'if'".to_string(),
                                     ..Default::default()
                                 });
+                            } else {
+                                last.2 = true; // mark 'else' seen
                             }
+                        } else {
+                            diagnostics.push(Diagnostic {
+                                range: Range {
+                                    start: Position::new(i as u32, j as u32),
+                                    end: Position::new(i as u32, (j + 4) as u32),
+                                },
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: "Unmatched 'else' with no open 'if'".to_string(),
+                                ..Default::default()
+                            });
                         }
                     }
-                    _ => {}
+                } else if rest.starts_with("end") {
+                    let after = rest.chars().nth(3);
+                    if (after.is_none() || !after.unwrap().is_alphanumeric())
+                        && block_stack.pop().is_none()
+                    {
+                        diagnostics.push(Diagnostic {
+                            range: Range {
+                                start: Position::new(i as u32, j as u32),
+                                end: Position::new(i as u32, (j + 3) as u32),
+                            },
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: "Unmatched 'end' with no corresponding 'if'".to_string(),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
 
@@ -82,6 +107,18 @@ impl Backend {
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 message: "Unmatched '('".to_string(),
+                ..Default::default()
+            });
+        }
+
+        for (line, col, _) in block_stack {
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: Position::new(line as u32, col as u32),
+                    end: Position::new(line as u32, (col + 2) as u32),
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: "Unclosed 'if' block, missing 'end'".to_string(),
                 ..Default::default()
             });
         }
