@@ -8,7 +8,7 @@ function M.setup(opts)
 	if not lspconfig.configs.dice_lsp then
 		lspconfig.configs.dice_lsp = {
 			default_config = {
-				cmd = opts.cmd or { "dice-lsp" },
+				cmd = opts.cmd or { "dicec" },
 				filetypes = { "dice" },
 				root_dir = lspconfig.util.root_pattern(".git", "."),
 				settings = opts.settings or {},
