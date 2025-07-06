@@ -1,10 +1,66 @@
-use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
+}
+
+impl Backend {
+    async fn check_syntax(&self, uri: Url, text: String) {
+        let mut diagnostics = Vec::new();
+        let mut open_parens: Vec<(usize, usize)> = Vec::new();
+
+        for (i, line) in text.lines().enumerate() {
+            for (j, c) in line.chars().enumerate() {
+                match c {
+                    '(' => open_parens.push((i, j)),
+                    ')' => {
+                        if open_parens.pop().is_none() {
+                            diagnostics.push(Diagnostic {
+                                range: Range {
+                                    start: Position::new(i as u32, j as u32),
+                                    end: Position::new(i as u32, (j + 1) as u32),
+                                },
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                message: "Unmatched ')'".to_string(),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if line.trim_end().ends_with(';') {
+                diagnostics.push(Diagnostic {
+                    range: Range {
+                        start: Position::new(i as u32, (line.len() - 1) as u32),
+                        end: Position::new(i as u32, line.len() as u32),
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: "Semicolons are unnecessary in Dice".to_string(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        for (line, col) in open_parens {
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: Position::new(line as u32, col as u32),
+                    end: Position::new(line as u32, (col + 1) as u32),
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: "Unmatched '('".to_string(),
+                ..Default::default()
+            });
+        }
+
+        self.client
+            .publish_diagnostics(uri, diagnostics, None)
+            .await;
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -38,59 +94,20 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = &params.text_document.uri;
-        let text = &params.text_document.text;
-
-        let mut diagnostics = Vec::new();
-        let mut parens = 0;
-        for (i, line) in text.lines().enumerate() {
-            for c in line.chars() {
-                if c == '(' {
-                    parens += 1;
-                } else if c == ')' {
-                    parens -= 1;
-                    if parens < 0 {
-                        diagnostics.push(Diagnostic {
-                            range: Range {
-                                start: Position::new(i as u32, 0),
-                                end: Position::new(i as u32, line.len() as u32),
-                            },
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            message: "Unmatched closing ')'".into(),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-
-            if line.ends_with(';') {
-                diagnostics.push(Diagnostic {
-                    range: Range {
-                        start: Position::new(i as u32, (line.len() - 1) as u32),
-                        end: Position::new(i as u32, line.len() as u32),
-                    },
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    message: "Semicolons are not required in Dice".into(),
-                    ..Default::default()
-                });
-            }
-        }
-
-        if parens > 0 {
-            diagnostics.push(Diagnostic {
-                range: Range {
-                    start: Position::new(0, 0),
-                    end: Position::new(0, 1),
-                },
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: "Unmatched opening '('".into(),
-                ..Default::default()
-            });
-        }
-
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
+        self.check_syntax(params.text_document.uri, params.text_document.text)
             .await;
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let content = &params.content_changes[0].text;
+        self.check_syntax(params.text_document.uri, content.clone())
+            .await;
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let content = params.text.unwrap_or_default();
+        self.check_syntax(uri, content).await;
     }
 }
 
