@@ -14,7 +14,7 @@ function M.setup(opts)
 	if not configs.dice_lsp then
 		configs.dice_lsp = {
 			default_config = {
-				cmd = opts.cmd or { "dicec" },
+				cmd = opts.cmd or { "dice-lsp" },
 				filetypes = { "dice" },
 				root_dir = lspconfig.util.root_pattern(".git", "."),
 				settings = opts.settings or {},
