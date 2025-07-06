@@ -41,21 +41,55 @@ impl LanguageServer for Backend {
         let uri = &params.text_document.uri;
         let text = &params.text_document.text;
 
-        let diagnostic = Diagnostic {
-            range: Range {
-                start: Position::new(0, 0),
-                end: Position::new(0, 4),
-            },
-            severity: Some(DiagnosticSeverity::WARNING),
-            message: "This is a dummy warning.".into(),
-            ..Default::default()
-        };
+        let mut diagnostics = Vec::new();
+        let mut parens = 0;
+        for (i, line) in text.lines().enumerate() {
+            for c in line.chars() {
+                if c == '(' {
+                    parens += 1;
+                } else if c == ')' {
+                    parens -= 1;
+                    if parens < 0 {
+                        diagnostics.push(Diagnostic {
+                            range: Range {
+                                start: Position::new(i as u32, 0),
+                                end: Position::new(i as u32, line.len() as u32),
+                            },
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message: "Unmatched closing ')'".into(),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
+            if line.ends_with(';') {
+                diagnostics.push(Diagnostic {
+                    range: Range {
+                        start: Position::new(i as u32, (line.len() - 1) as u32),
+                        end: Position::new(i as u32, line.len() as u32),
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: "Semicolons are not required in Dice".into(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        if parens > 0 {
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 1),
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: "Unmatched opening '('".into(),
+                ..Default::default()
+            });
+        }
 
         self.client
-            .publish_diagnostics(uri.clone(), vec![diagnostic], None)
-            .await;
-        self.client
-            .log_message(MessageType::INFO, "Opened File")
+            .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
     }
 }
