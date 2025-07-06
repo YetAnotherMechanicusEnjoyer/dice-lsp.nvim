@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -129,7 +130,7 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
+#[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(
         &self,
