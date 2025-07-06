@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+async-trait = "0.1.88"
 tokio = { version = "1.46.1", features = ["full"] }
 tower-lsp = "0.20.0"
